@@ -1,0 +1,269 @@
+# Load packages
+library(dplyr)
+library(ggplot2)
+library(pscl)
+library(rpart)
+library(tidyr)
+library(dominanceanalysis)
+library(lmtest)
+
+# Read & view dataset
+mydata <- read.csv("Titanic - training set.csv")
+View(mydata)
+
+# Defining categorical variables as factors, embarked coded according to the route
+mydata = mydata %>%
+  mutate(Sex = factor(recode(Sex, "male" = "1", 
+                             "female" = "0")),
+         Embarked = factor(recode(Embarked, "S" = "0",
+                                  "C" = "1", "Q" = "2")))
+
+# DESCRIPTIVE AND EXPLORATORY STATISTICS OF THE DATASET
+mydata %>%
+  summary()
+
+# Structure
+str(mydata)
+
+# Missining values
+sum(is.na(mydata))
+# 177 missing data in Age variable
+
+# Bar plot of Survival 
+mydata %>%
+  ggplot(aes(as.factor(Survived))) +
+  geom_bar() + ggtitle("Bar plot - Survived") + theme_minimal()
+
+# Histogram chart of the "Age"
+mydata %>%
+  ggplot(aes(Age)) +
+  geom_histogram(fill = "dodgerblue", alpha = 0.5) + ggtitle("Histogram - Age") + theme_minimal()
+
+# Visualization of "Parch"
+ggplot(mydata, aes(Parch)) + 
+  geom_density(kernel = "gaussian") +
+  theme_classic() + 
+  ggtitle("Number of parents or 
+          children accompanying 
+          the passenger on board")
+summary(mydata$Parch)
+
+# Histogram of hypothesis that males survived to a lesser extent when compared to females
+ggplot(mydata, aes(x = Sex, fill = factor(Survived))) +
+  geom_histogram(width = 0.5) +
+  xlab("Gender") + ylab("Total count") + labs(fill = "Survived")
+
+# New variable "Title"
+mydata$title <- gsub('(.*, )|(\\..*)', '', mydata$Name) 
+
+# View the unique titles in data set
+unique(mydata$title)
+
+# Replacing NA's in Age with predicted values for age
+age.fit<- rpart(Age~ Pclass + Sex + SibSp + Parch + Fare + Embarked, data=mydata[!is.na(mydata$Age),],method="anova")
+mydata$Age[is.na(mydata$Age)] <- predict(age.fit, mydata[is.na(mydata$Age),])
+table(is.na(mydata$Age))
+# Double check if NA's are replaced
+sum(is.na(mydata))
+
+# Round Age to integer
+mydata$Age <-round(mydata$Age,0)
+
+# Adding a variable "Family Size"
+mydata$FamilySize <- mydata$SibSp + mydata$Parch + 1
+
+# LOGISTIC REGRESSION MODELS
+# The univariate logistic regression model
+mod1 = glm(Survived ~ Sex, 
+           family = binomial(), 
+           data = mydata)
+summary(mod1)
+
+mod2 = glm(Survived ~ Sex + Embarked + Pclass + Sex*Parch, 
+           family = binomial(), 
+           data = mydata)
+summary(mod2)
+
+mod3 = glm(Survived ~ Sex + Pclass + Age + Sex*Parch, 
+           family = binomial(), 
+           data = mydata)
+summary(mod3)
+
+# FINAL LOGISTIC REGRESSION
+mod4 = glm(Survived ~ Sex + Pclass + Age + FamilySize, 
+           family = binomial(), 
+           data = mydata)
+summary(mod4)
+
+# Retrieve only the coefficients from the final model
+exp(coef(mod4))
+
+# Analyze the table of deviance
+anova(mod4, test="Chisq")
+
+# Predict mod4
+predict(mod4)
+
+# McFadden Rˆ2 index
+pR2(mod4)
+# 11h = -395.5758121, McFadden = 0.3332927 
+
+# -2LL, deviance (model fit)
+pR2(mod4)["llh"] * -2
+# Fitting null model for pseudo-r2 = 791.1516 
+
+# Prediction accuracy for categorization
+mydata = mydata %>%
+  mutate(pred_mod4 = predict(mod4)) %>%
+  mutate(pred_mod4 = case_when(pred_mod4 <= 0 ~ 0,
+                               pred_mod4 > 0 ~ 1))
+# Coding correct guesses
+mydata = mydata %>%
+  mutate(correct_prediction = case_when(pred_mod4 == Survived ~ "correct",
+                                        pred_mod4 != Survived ~ "incorrect"))
+# Correct categorization rate overall
+mydata %>%
+  group_by(correct_prediction) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count / sum(count))
+# Prediction rate: 81% 
+
+# log(odds) 
+log(1502/2224)
+# Predicted outcome: -0.357
+
+# Null model
+mod_null = glm(Survived ~ 1, family = binomial(), data = mydata)
+summary(mod_null)
+
+head(predict(mod_null))
+
+# Percentage of Survived
+mydata %>%
+  group_by(Survived) %>%
+  summarise(count = n())  %>%
+  mutate(freq = count / sum(count))
+
+# Crosstab of Survived and predicted values
+mydata %>%
+  group_by(Survived, pred_mod4) %>%
+  summarize(n = n()) %>%
+  spread(Survived, n)
+
+# Correctly categorized as survived
+mydata %>%
+  filter(Survived == 1) %>%
+  group_by(correct_prediction) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count / sum(count))
+# Correct: 71%
+
+# Correctly categorized as died
+mydata %>%
+  filter(Survived == 0) %>%
+  group_by(correct_prediction) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count / sum(count))
+# Correct: 87%
+
+# Fine-tuning the sensitivity of the model
+mydata = mydata %>%
+  mutate(pred_mod4_tuned = predict(mod4)) %>%
+  mutate(pred_mod4_tuned = case_when(pred_mod4_tuned <= -0.4 ~ 0,
+                                     pred_mod4_tuned > -0.4 ~ 1))
+
+# Coding correct guesses
+mydata = mydata %>%
+  mutate(correct_prediction_tuned = case_when(pred_mod4_tuned == Survived ~ "correct", 
+                                              pred_mod4_tuned != Survived ~ "incorrect"))
+
+# Correct categorization rate overall
+mydata %>%
+  group_by(correct_prediction_tuned) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count / sum(count))
+# Correct: 80%
+
+# Crosstab of Survived and predicted values
+mydata %>%
+  group_by(Survived, pred_mod4_tuned) %>%
+  summarize(n = n()) %>%
+  spread(Survived, n)
+
+# Correctly categorized as Survived
+mydata %>%
+  filter(Survived == 1) %>%
+  group_by(correct_prediction_tuned) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count / sum(count))
+# 76%
+
+# Correctly categorized as Died
+mydata %>%
+  filter(Survived == 0) %>%
+  group_by(correct_prediction_tuned) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count / sum(count))
+# 82%
+
+# Likelihood ratio test
+lrtest(mod_null, mod4)
+# mod4 has a higher Log Likelihood i.e. has the better fit. The test has a significant result. 
+
+# Akaike Information Criterion (AIC)
+AIC(mod_null, mod4)
+# The difference in AIC is 4. 
+
+confint(mod4)
+
+# Predicted probability of survival for Sue without Leonardo
+5.732174-1.244924*3-0.041621*4-0.250101*2
+# 1.330716 in log(odds)
+# Compute the probability: formula p = Odds / (1 + Odds)
+1.330716/(1+1.330716)
+#  0.5709473 ~ 57%
+
+# Predicted probability of survival for Sue with Leonardo
+5.732174-1.244924*3-0.041621*4-0.250101*3
+# 1.080615 in log(odds)
+# Compute the probability: formula p = Odds / (1 + Odds)
+1.080615/(1+1.080615)
+#  0.5193729 ~ 52%
+
+# Predicted probability of survival for Kate without Leonardo
+5.732174-1.244924*3-0.041621*20-0.250101*2
+# 0.66478 in log(odds)
+# Compute the probability: formula p = Odds / (1 + Odds)
+0.66478/(1+0.66478)
+#  0.39932 ~ 40%
+
+# Predicted probability of survival for Kate with Leonardo
+5.732174-1.244924*3-0.041621*20-0.250101*3
+# 0.414679 in log(odds)
+# Compute the probability: formula p = Odds / (1 + Odds)
+0.414679/(1+0.414679)
+#  0.2931259 ~ 30%
+
+# Table of models (null and final)
+msummary(
+  list(mod_null, mod4),
+  output = "default",
+  statistic = c("std.error"), 
+  stars = TRUE,
+  conf_level = 0.95,
+  vcov = NULL
+)
+
+# Relative contribution of predictors to the model 
+# In accordance with: https://cran.r-project.org/web/packages/dominanceanalysis/vignettes/da-logistic-regression.html
+da.glm.fit()("names")
+dapres<-dominanceAnalysis(mod4)
+getFits(dapres,"r2.m")
+dominanceMatrix(dapres, type="complete",fit.functions = "r2.m", ordered=TRUE)
+plot(dapres, which.graph ="conditional",fit.function = "r2.m")
+averageContribution(dapres,fit.functions = "r2.m")
+
+# Plot of general dominance used in report 
+plot(dapres, which.graph ="general",fit.function = "r2.m") + coord_flip()
+
+
