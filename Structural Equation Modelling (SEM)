@@ -1,0 +1,116 @@
+# LOAD PACKAGES
+library(lavaan) # for SEM fit and model functions
+library(semPlot) # for semPaths()
+library(semptools) # for set_sem_layout
+library(tidyverse) # for tidy code
+library(CompQuadForm) # for mvnorm.kur.test and mvnorm.skew.test (prerequisite) library(ICS) # for mvnorm.kur.test and mvnorm.skew.test
+library(psychTools)
+
+# LOAD DATASET
+my_data = holzinger.swineford
+
+# DATASET IS CLEANED
+
+# TASK 1
+modelA <- '
+  # measurement model
+    vispercab =~ t01_visperc + t02_cubes + t03_frmbord + t04_lozenges
+    verbab =~ t06_paracomp + t07_sentcomp + t09_wordmean
+    procspee =~ t10_addition + t12_countdot + t13_sccaps
+    
+  # regressions
+   
+  # residual correlations
+'
+
+fitA <- sem(modelA, data = my_data)
+
+plotA = semPaths(fitA)
+
+summary(fitA, fit.measures = T, standardized = T, rsquare = T)
+# Model is identified in SEM, the degrees of freedom are > 0. 
+
+# Check assumption multivariate normality
+# This has to be done as ML is used as an estimator and that presumes that 
+# the data eused in the model comes from a multivariate normal distribution.
+mvnorm.kur.test(my_data[,c("t01_visperc", "t02_cubes", "t03_frmbord", "t04_lozenges", 
+                           "t06_paracomp", "t07_sentcomp", "t09_wordmean",
+                           "t10_addition", "t12_countdot", "t13_sccaps"
+                           )])
+# The assumption of normality is violated
+
+# Solution of the ML estimator
+summary(fitA)
+
+# Robust ML estimators (MLM/Satorra-Bentler)
+# or simply maximum likelihood estimation & robust standard error
+fitA_MLM <-  sem(modelA, data = my_data, estimator = "MLM")
+
+# Check goodness of the fit TLI, CFI, RMSEA (+ confidence interval)
+summary(fitA_MLM, fit.measures = T, standardized = T, rsquare = T)
+
+# Bootstrap
+fitA_boot <- sem(modelA, data = my_data, se = "bootstrap", test = "bootstrap")
+summary(fitA_boot, fit.measures = T, standardized = T, rsquare = T)
+
+# Compare model fit
+anova(fitA_MLM, fitA_boot)
+
+# TASK 2
+modelB <- '
+  # measurement model
+    vispercab =~ t01_visperc + t02_cubes + t03_frmbord + t04_lozenges
+    verbab =~ t06_paracomp + t07_sentcomp + t09_wordmean
+    procspee =~ t10_addition + t12_countdot + t13_sccaps
+    
+    
+  # regressions
+   
+  # residual correlations
+  t10_addition ~~ t12_countdot
+'
+
+fitB <- sem(modelB, data = my_data)
+
+plotB = semPaths(fitB) 
+
+# Robust ML estimators (MLM/Satorra-Bentler)
+fitB_MLM <-  sem(modelB, data = my_data, estimator = "MLM")
+summary(fitB_MLM, fit.measures = T)
+
+# Compare model fit (Considering alternative models)
+anova(fitA_MLM, fitB_MLM)
+# p value is significant > there is a significant difference between the fit of the models. 
+# The model with the lower Chi-squared is preferred i.e. fitB_MLM. 
+# Smaller AIC means better fit i.e. fitB_MLM
+
+# Which of the manifest variables t01_visperc, t02_cubes, t03_frmbord, t04_lozenges 
+# are least influenced by Visual perception ability (latent variable). 
+# What do you base this decision on?
+summary(fitB_MLM)
+# Estimate in the output (latent variable) indicates how strong the relationship is: 
+# In our case t02_cubes is least influenced by the latent variable. 
+# Visual:
+semPaths(fitB_MLM, whatLabels = "std")
+summary(fitB_MLM, std = T)
+
+# TASK 3
+model_mediation =
+  "
+  t13_sccaps ~ c*t01_visperc  + b*t12_countdot 
+  t12_countdot ~ a*t01_visperc
+  # indirect effect (a*b)
+             indirect := a*b
+  # total effect
+             total := c + (a*b)
+"
+fit_mediation = sem(model_mediation, data = my_data)
+semPaths(fit_mediation, whatLabels = "est")
+summary(fit_mediation)
+
+# total effect
+# total := c + (a*b)
+# a*b indirect effect
+# direct effect c
+0.31+(0.23*0.38)
+[1] 0.3974
