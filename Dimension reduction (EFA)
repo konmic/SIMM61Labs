@@ -1,0 +1,331 @@
+# PREPERATIONS
+# Load packages
+library(GGally) # for ggcorr
+library(corrr) # network_plot
+library(ggcorrplot) # for ggcorrplot
+library(corrplot) # for corrplot
+library(FactoMineR) # multiple PCA functions
+library(factoextra) # visualisation functions for PCA (e.g. fviz_pca_var) library(paran) # for paran
+library(psych) # for the mixedCor, cortest.bartlett, KMO, fa functions
+library(car) # for vif
+library(GPArotation) # for the psych fa function to have the required rotation functional library(MVN) # for mvn function
+library(ICS) # for multivariate skew and kurtosis test 
+library(mvnTest)
+library(MVN)
+library(paran) # for paran
+library(tidyverse) # for tidy code
+
+# Load custom functions
+fviz_loadnings_with_cor <- function(mod, axes = 1, loadings_above = 0.4){	
+  require(factoextra)	
+  require(dplyr)	
+  require(ggplot2)	
+  
+  
+  
+  if(!is.na(as.character(mod$call$call)[1])){	
+    if(as.character(mod$call$call)[1] == "PCA"){	
+      contrib_and_cov = as.data.frame(rbind(mod[["var"]][["contrib"]], mod[["var"]][["cor"]]))	
+      
+      vars = rownames(mod[["var"]][["contrib"]])	
+      attribute_type = rep(c("contribution","correlation"), each = length(vars))	
+      contrib_and_cov = cbind(contrib_and_cov, attribute_type)	
+      contrib_and_cov	
+      
+      plot_data = cbind(as.data.frame(cbind(contrib_and_cov[contrib_and_cov[,"attribute_type"] == "contribution",axes], contrib_and_cov[contrib_and_cov[,"attribute_type"] == "correlation",axes])), vars)	
+      names(plot_data) = c("contribution", "correlation", "vars")	
+      
+      plot_data = plot_data %>% 	
+        mutate(correlation = round(correlation, 2))	
+      
+      plot = plot_data %>% 	
+        ggplot() +	
+        aes(x = reorder(vars, contribution), y = contribution, gradient = correlation, label = correlation)+	
+        geom_col(aes(fill = correlation)) +	
+        geom_hline(yintercept = mean(plot_data$contribution), col = "red", lty = "dashed") + scale_fill_gradient2() +	
+        xlab("variable") +	
+        coord_flip() +	
+        geom_label(color = "black", fontface = "bold", position = position_dodge(0.5))	
+      
+      
+    }	
+  } else if(!is.na(as.character(mod$Call)[1])){	
+    
+    if(as.character(mod$Call)[1] == "fa"){	
+      loadings_table = mod$loadings %>% 	
+        matrix(ncol = ncol(mod$loadings)) %>% 	
+        as_tibble() %>% 	
+        mutate(variable = mod$loadings %>% rownames()) %>% 	
+        gather(factor, loading, -variable) %>% 	
+        mutate(sign = if_else(loading >= 0, "positive", "negative"))	
+      
+      if(!is.null(loadings_above)){	
+        loadings_table[abs(loadings_table[,"loading"]) < loadings_above,"loading"] = NA	
+        loadings_table = loadings_table[!is.na(loadings_table[,"loading"]),]	
+      }	
+      
+      if(!is.null(axes)){	
+        
+        loadings_table = loadings_table %>% 	
+          filter(factor == paste0("V",axes))	
+      }	
+      
+      
+      plot = loadings_table %>% 	
+        ggplot() +	
+        aes(y = loading %>% abs(), x = reorder(variable, abs(loading)), fill = loading, label =       round(loading, 2)) +	
+        geom_col(position = "dodge") +	
+        scale_fill_gradient2() +	
+        coord_flip() +	
+        geom_label(color = "black", fill = "white", fontface = "bold", position = position_dodge(0.5)) +	
+        facet_wrap(~factor) +	
+        labs(y = "Loading strength", x = "Variable")	
+    }	
+  }	
+  
+  
+  
+  
+  
+  
+  return(plot)	
+  
+}	
+
+
+# Load dataset
+adata <- read_csv("animalrights.csv")
+view(adata)
+
+
+# DESCRIPTIVE & EXPLORATORY STATISTICS
+# Missing data
+sum(is.na(adata))
+# 11 NA, the small amount of NA allows for dropping the missing data. 
+adata <- adata %>%
+  drop_na()
+
+# Basic descriptive statistics
+adata %>%
+  describe()
+str(adata)
+summary(adata)
+
+# By running the code above, three skewed variables have been identified; 
+# Visualization & outliers identification (ar3, ar14, and Sex):
+
+# ar3
+boxplot(adata$ar3,
+        ylab = "ar3")
+# 5 outliers identified
+
+outar3 <- boxplot.stats(adata$ar3)$out
+out_ind <- which(adata$ar3 %in% c(out))
+out_ind
+# 5 outliers identified
+
+# ar14
+boxplot(adata$ar14,
+        ylab = "ar14")
+outar14 <- boxplot.stats(adata$ar14)$out
+out_ind <- which(adata$ar3 %in% c(out))
+out_ind
+
+# Sex
+hist(adata$sex,
+     xlab = "Sex", 
+     main = "Histogram of Sex")
+# 120 of the respondents identify themselves as women, compared to 29 men. 
+
+# Recoding
+# Reverse coding of variables ar16, ar18, ar19, ar21, ar24, and ar28. 
+table(adata$ar16)
+adata[ , c(16, 18, 19, 21, 24, 28)] = 6 - adata[ , c(16, 18, 19, 21, 24, 28)]
+# Check wheteher the conversion is correct
+table(adata$ar16)
+
+# CHECKING THE ASSUMPIONS FOR EFA
+# Selecting dataframe with ar1-28
+adata_items_only = adata %>%
+  select(ar1:ar28)
+
+# Creating correlation matrix of data
+cor = adata_items_only %>%
+  cor()
+cor
+
+# Kaiser-Meyer-Olkin (KMO)
+KMO(cor)
+# Overall KMO = 0.87 i.e. KMO is higher than 0.6 -> this indicates good factorability
+
+# Factor extraction
+result <- mvn(adata[, 1:28], mvnTest = "hz")
+result$multivariateNormality
+# p-value: 0
+
+mvnorm.kur.test(na.omit(adata[, 1:28]))
+# p-value: 2.2e -16
+
+mvnorm.skew.test(na.omit(adata[, 1:28]))
+# p-value: 3.331e-16
+# The three tests above indicate that the assumption of normality is violated
+# Therefore paf extraction method will be used. 
+
+# Sorted communality
+EFA_mod1 <- fa(cor, nfactors = 5, fm = "pa")
+EFA_mod1_common <- as.data.frame(sort(EFA_mod1$communality, decreasing = TRUE))
+EFA_mod1_common
+
+# Average communality
+mean(EFA_mod1$communality)
+# Since the number of observers is below 250, MacCallum et al. suggest that 
+# the average communality of the items should be at least 0.6
+# In this case it is 0.44 -> Consider the exclusion of poorly represented 
+# (low communality) items when communality < 0.3 
+# This concerns following variables ar25, ar22, ar16, ar14, ar3. 
+adata_selected <- select(adata_items_only, -c(ar25, ar22, ar16, ar14, ar3))
+
+# Creating a new correlation matrix with excluded variables 
+cor() = adata_selected %>%
+  cor()
+cor
+# Communality after removing the lowest five variables is still < 0.6. This is a limitation for discussion. 
+
+
+# CHOOSING THE IDEAL NUMBER OF FACTORS (a-e)
+# a) Scree test 
+scree(cor,factors=TRUE,main="Scree plot",hline=NULL,add=FALSE) 
+VSS.scree(cor, main = "scree plot")
+# 5 components
+
+# b) Kaiser-Guttman criterion:
+get_eig(cor)
+# 7 components
+
+# c) Parallel test:
+cor_ret = paran(adata_items_only, graph = TRUE)
+cor_ret$Retained
+# 2 components 
+
+# d) VSS:
+vss(cor)
+# 1 components
+
+# e) MAP: 
+# 2 components 
+
+# Parallel Analysis Scree Plots
+fa.parallel(cor, n.obs = nrow(adata), fa = "fa", fm = "pa")
+
+# Suggest the number of factors
+nfactors(cor, n.obs = nrow(adata))
+# number of factors 2
+
+# In choosing the ideal number of factors the five tests above different 
+# factor numbers is suggested by each method. Therefore models using all five 
+# different factors will be considered. 
+# a) factor: 5
+EFA_mod2 <- fa(cor, nfactors = 5, fm = "pa")
+EFA_mod2_common <- as.data.frame(sort(EFA_mod2$communality, decreasing = TRUE))
+EFA_mod2_common
+mean(EFA_mod2$communality)
+# Average communality: 0.4409266
+
+# b) factor: 7
+EFA_mod3 <- fa(cor, nfactors = 7, fm = "pa")
+EFA_mod3_common <- as.data.frame(sort(EFA_mod3$communality, decreasing = TRUE))
+EFA_mod3_common
+mean(EFA_mod3$communality)
+# Average communality: 0.4863786
+
+# c) factor: 2
+EFA_mod4 <- fa(cor, nfactors = 2, fm = "pa")
+EFA_mod4_common <- as.data.frame(sort(EFA_mod4$communality, decreasing = TRUE))
+EFA_mod4_common
+mean(EFA_mod4$communality)
+# Average communality: 0.3431796
+
+# d) factor: 1
+EFA_mod5 <- fa(cor, nfactors = 1, fm = "pa")
+EFA_mod5_common <- as.data.frame(sort(EFA_mod5$communality, decreasing = TRUE))
+EFA_mod5_common
+mean(EFA_mod5$communality)
+# Average communality: 0.2961645
+
+# e) factor: 
+# See EGA_mod4
+
+# Factor rotation & interpreting factors
+# a) factor: 5
+EFA_mod2$rotation
+EFA_mod2_promax <- fa(cor, nfactors = 5, fm = "pa", rotate = "promax")
+fa.diagram(EFA_mod2)
+fa.diagram(EFA_mod2_promax)
+
+# b) factor: 7 # FINAL MODEL
+EFA_mod3$rotation # Oblimin (deafult)
+EFA_mod3_promax <- fa(cor, nfactors = 7, fm = "pa", rotate = "promax") # Promax
+EFA_mod3_varimax <- fa(cor, nfactors = 7, fm = "pa", rotate = "varimax") # Varimax
+
+# Diagrams of the above
+fa.diagram(EFA_mod3_promax)
+fa.diagram(EFA_mod3_varimax)
+fa.diagram(EFA_mod3)
+
+# d) factor: 1
+EFA_mod5$rotation
+EFA_mod5_promax <- fa(cor, nfactors = 1, fm = "pa", rotate = "promax")
+fa.diagram(EFA_mod5)
+
+# As indicated above the final model consists of seven factors the results of EFA are visualized below:
+fviz_loadnings_with_cor(EFA_mod3_promax, axes = 1, loadings_above = 0.4)
+
+fviz_loadnings_with_cor(EFA_mod3_promax, axes = 2, loadings_above = 0.4)
+
+fviz_loadnings_with_cor(EFA_mod3_promax, axes = 3, loadings_above = 0.4)
+
+# Final touches
+FinalRound <- fa(adata, nfactors = 7, rotate = "oblimin", fm = "ml")
+FinalRound
+
+fa.diagram(FinalRound, main = "adata")
+
+# Removing following items ar6,8,18,20,27 due to crossloadings > 0.29
+FinalRound2 <- fa(adata[, -c(6,8,18,20,27)], nfactors = 7, rotate = "oblimin", fm = "ml")
+FinalRound2
+
+fa.diagram(FinalRound2, main = "adata")
+
+# ONCE AGAIB INTERPRETING FACTORS: Ordering highest loadings (above 0.4)
+fviz_loadnings_with_cor(FinalRound2, axes = 1, loadings_above = 0.4)
+fviz_loadnings_with_cor(FinalRound2, axes = 2, loadings_above = 0.4)
+fviz_loadnings_with_cor(FinalRound2, axes = 3, loadings_above = 0.4)
+fviz_loadnings_with_cor(FinalRound2, axes = 4, loadings_above = 0.4)
+
+# Average post extraction communality
+FinalRound2_common <- as.data.frame(sort(FinalRound2$communality, decreasing = TRUE))
+FinalRound2_common
+
+mean(FinalRound2$communality)
+# 0.48
+
+# NAME THE LATENT FACTORS (see report)
+
+# SAVING THE FACTOR SCORES 
+anifash = c(4,5,13,23,26,22)
+humrole = c(10,24,28,7)
+anirights = c(15,12,14)
+aniexper = c(21,19)
+
+# Adding average scores of the factors above to the dataframe
+adata$anifash = apply(adata[, anifash], 1, mean)
+adata$humrole = apply(adata[, humrole], 1, mean)
+adata$anirighs = apply(adata[, anirights], 1, mean)
+adata$aniexper = apply(adata[, aniexper], 1, mean)
+
+# Linear regression (liberal dependent and factors above as predictors)
+linearregression <- lm(liberal ~ anifash + anirighs + humrole + aniexper, data = adata)
+summary(linearregression)
+# p-value for humrole is 0.00202 (< 0.05) i.e. significant and the latent variable 
+# humrole  is therefore the only (most influential) predictor of how liberal a person is.  
+
