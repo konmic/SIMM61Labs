@@ -296,7 +296,7 @@ FinalRound2
 
 fa.diagram(FinalRound2, main = "adata")
 
-# ONCE AGAIB INTERPRETING FACTORS: Ordering highest loadings (above 0.4)
+# ONCE AGAIN INTERPRETING FACTORS: Ordering highest loadings (above 0.4)
 fviz_loadnings_with_cor(FinalRound2, axes = 1, loadings_above = 0.4)
 fviz_loadnings_with_cor(FinalRound2, axes = 2, loadings_above = 0.4)
 fviz_loadnings_with_cor(FinalRound2, axes = 3, loadings_above = 0.4)
