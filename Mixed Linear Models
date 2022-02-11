@@ -1,0 +1,222 @@
+# LOAD PACKAGES
+library(psych) # for describe\t
+library(r2glmm) # for r2beta\t
+library(lme4) # for lmer
+library(lmerTest) # to get singificance test in lmer library(MuMIn) # for r.squaredGLMM
+library(cAIC4) # for cAIC	
+library(MuMIn) # for r.squaredGLMM	
+library(tidyverse) # for tidy code and ggplot\t library(cAIC4) # for cAIC\t
+library(lessR) # for reg_brief
+library(finalfit)
+
+# LOAD CUSTOM FUNCTIONS
+# To extract standardized beta coefficients from linear mixed models
+stdCoef.merMod <- function(object) {	
+  sdy <- sd(getME(object,"y"))	
+  sdx <- apply(getME(object,"X"), 2, sd)	
+  sc <- fixef(object)*sdx/sdy	
+  se.fixef <- coef(summary(object))[,"Std. Error"]	
+  se <- se.fixef*sdx/sdy	
+  return(data.frame(stdcoef=sc, stdse=se))	
+}	
+
+# LOAD DATA
+# Datafile A
+datafileA <- read_csv("surgery_data_A.csv")
+view(datafileA)
+
+# Datafile B
+datafileB <- read_csv("surgery_data_B.csv")
+view(datafileB)
+
+# DESCRIPTIVE & EXPLORATORY STATISTICS
+# DESCRIPTIVE AND EXPLORATORY STATISTICS OF THE DATASETS
+datafileA %>%
+  summary()
+# Findings: pain_cat is supposed to range from 0 to 52, but the min value is 20. 
+# Hospitals range from 1-10 and ar coded accordingly hospital_X. 
+# There is one entry on income that is negative, but the income variable isn't specified
+# in the text, therfore we cannot rule out this entry, as the defintion for income can have
+# been one that includes negative income e.g. net income. 
+
+# Structure
+str(datafileA)
+
+# Missining values
+sum(is.na(datafileA))
+# No missing data
+
+# Checking for coding errors
+unique(datafileA$sex)
+# Shows that there are two ways of coding female (woman)
+datafileA %>%
+  mutate(recode(sex, "woman" = "female"))
+  
+# Same as above but with datafileB
+datafileB %>%
+  summary()
+str(datafileB)
+sum(is.na(datafileB))
+
+# REPEATED MEASURES ANALYSIS USING LINEAR MIXED MODELS
+# Assign hospital as a grouping factor
+datafileA = datafileA %>%
+  mutate(hospital = factor(hospital))
+
+datafileB = datafileB %>%
+  mutate(hospital = factor(hospital))
+
+# Exploring clustering in the data:
+# Simple regression model of pain ~ cortisol_serum on a scatterplot
+datafileA %>%
+  ggplot() + aes(y = pain, x = cortisol_serum) + geom_point(aes(color = hospital),
+                                                      size = 4) + geom_smooth(method = "lm", se = F)
+# There is a clear positive relationship between cortisol_serum and the pain
+
+# Plot the regression lines for each hospital separately
+datafileA_plot = datafileA %>%
+  ggplot() + aes(y = pain, x = cortisol_serum, color = hospital) +
+  geom_point(size = 4) + geom_smooth(method = "lm", se = F,
+                                     fullrange = TRUE)
+datafileA_plot
+# When plotting the regression lines for each hospital separately,
+# hospital seems to be able to explain some of the variability in the data
+
+# Fit a linear regression mixed model (random intercept, hospital ID)
+datafileAlmer = lmer(pain ~ age + sex + STAI_trait + pain_cat + mindfulness + cortisol_serum +
+                     (1 | hospital), data = datafileA)
+
+# To view the model coefficients
+summary(datafileAlmer)
+
+# To get confidence intervals
+confint(datafileAlmer)
+# The tables obtained from the output to the data above have been imported and processed in Excel. 
+
+# Marginal R^2
+r2beta(datafileAlmer, method = "nsj", data = datafileA)
+# 0.387
+
+# Marginal and conditional R^2 values
+r.squaredGLMM(datafileAlmer)
+#0.387
+
+# To get standardized betas for each predictor
+stdCoef.merMod(datafileAlmer)
+
+# COMPUTE THE VARIANCE EXPLAINED
+# Formula: 1-(RSS/TSS) = R^2
+
+# RSS (residual sum of squares) -> the sum of the squared residual error terms 
+# of your model with including the fixed effect predictors
+RSS = sum((datafileA$pain - predict(datafileAlmer))^2)
+RSS
+# Alternative solution:
+sum(residuals(datafileAlmer)^2)
+# RSS = 222.5893
+
+# TSS -> the sum of the squared residual error terms of the null model, 
+# which only uses the mean value of the outcome as a prediction. 
+mod_mean = lm(pain ~ 1, data = datafileA) # null model
+TSS = sum((datafileA$pain - predict(mod_mean))^2)
+TSS
+# Alternative solution: 
+sum((datafileA$pain - mean(datafileA$pain))^2)
+# TSS = 440.72
+
+# Formula for variance explained: 1-(RSS/TSS) = R^2
+1-(RSS/TSS) 
+# R^2 = 0.4949416
+# This means that by using the regression model, we are able to explain
+# 49.5% of the variability in the outcome. 
+
+# PREDICT PAIN IN datafileB using previous coefficients 
+# Get the coefficients: 
+coefficientmatrix = summary(datafileAlmer)$coefficients
+
+# Equation: painpredictB = 3.74278 - 0.06303*datafileB$age + 0.24999*datafileB$sexmale 
+# + 1.30994*datafileB$sexwoman - 0.01975*datafileB$STAI_trait + 0.08047*datafileB$pain_cat
+# - 0.22338*datafileB$mindfulness + 0.51602*datafileB$cortisol_serum
+
+3.74278 - 0.06303*datafileB$age + 0.24999*datafileB$sexmale 
++ 1.30994*datafileB$sexwoman - 0.01975*datafileB$STAI_trait + 0.08047*datafileB$pain_cat 
+- 0.22338*datafileB$mindfulness + 0.51602*datafileB$cortisol_serum
+
+# COMPUTE THE VARIANCE EXPLAINED IN datafileB
+# Formula: 1-(RSS/TSS) = R^2
+# To get RSS for datafileB
+RSSB = sum((datafileB$pain - predict(datafileAlmer))^2)
+RSSB
+# RSSb = 674.7419
+
+# To get TSS for datafileB
+mod_meanB = lm(pain ~ 1, data = datafileB) # null model
+TSSB = sum((datafileB$pain - predict(mod_meanB))^2)
+TSSB
+# TSS = 495.5
+
+# Formula for variance explained: 1-(RSS/TSS) = R^2
+1-(RSSB/TSSB)
+# R^2 = -0.36617394
+
+# Compare this R2 to the marginal and conditional 
+# R2 values computed for the model on data file A.
+# R^2 = -0.36617394 for datafileB
+# marginal and conditional R squared values for datafileA = 0.3870799
+
+# FIT A LINEAR REGRESSION MIXED MODEL with the most influential predictor
+summary(datafileAlmer)
+# sex seems to be most influential predictor, but it is binary, so let's
+# try using cortisol_srm
+# Random intercept model
+datafileAlmer2 = lmer(pain ~ cortisol_serum +
+                       (1 | hospital), data = datafileA)
+
+# Random slope model
+datafilesAlmer2slope = lmer(pain ~ cortisol_serum +
+                       (cortisol_serum | hospital), data = datafileA)
+# Output: Error - Singular fit -> random effect predictor seems to be not useful in modeling the data.
+summary(datafilesAlmer2slope)
+
+# Changing default optimizer to Nelder_Mead
+mod_rnd_slope_opt = lmer(pain ~ cortisol_serum + (cortisol_serum |
+                                                        hospital), control = lmerControl(optimizer = "Nelder_Mead"),
+                         data = datafileA)
+
+# VISUALIZATION
+# Saving the predictions of the models into a variable.
+datafileAlmer_withpreds = datafileAlmer_withpreds %>%
+  mutate(pred_int = predict(datafileAlmer2), pred_slope = predict(mod_rnd_slope_opt))
+
+# Random intercept model
+datafileAlmer_withpreds %>%
+  ggplot() + ggtitle("Random intercept") + aes(y = pain, x = cortisol_serum, group = hospital) +
+  geom_point(aes(color = hospital), size = 4) + 
+  geom_line(color = "red",
+                                                       aes(y = pred_int, x = cortisol_serum)) + facet_wrap(~hospital,
+                                                                                                         ncol = 2)
+
+# Regression line of the random slope model
+datafileAlmer_withpreds %>%
+  ggplot() + ggtitle("Random slope") + aes(y = pain, x = cortisol_serum, group = hospital) +
+  geom_point(aes(color = hospital), size = 4) + geom_line(color = "red",
+                                                       aes(y = pred_slope, x = cortisol_serum)) + facet_wrap(~hospital,
+                                                                                                           ncol = 2)
+
+# COMPARING MODELS
+# Comparing model fit indices
+sum(residuals(datafileAlmer2)^2)
+#292.8688
+sum(residuals(mod_rnd_slope_opt)^2)
+#287.6138
+
+# Instead use cAIC()
+# Random intercept
+cAIC(datafileAlmer2)$caic
+# 664.5371
+# Random slope
+cAIC(mod_rnd_slope_opt)$caic
+# 661.3712
+# Interpretation of the two above: the difference is > 2 points i.e. there is
+# a significant difference between the two fits. 
+# Moreover, the random slope is better as the value is lower. 
